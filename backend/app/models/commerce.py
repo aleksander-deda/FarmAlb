@@ -181,7 +181,7 @@ class Review(Base):
     booking_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("bookings.id", ondelete="RESTRICT"), unique=True, nullable=False)
     vendor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("vendors.id", ondelete="CASCADE"), nullable=False, index=True)
 
-    rating: Mapped[int] = mapped_column(Integer, nullable=False)   # 1–5
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
     body: Mapped[str | None] = mapped_column(Text)
     verified_visit: Mapped[bool] = mapped_column(default=True, nullable=False)
 
@@ -189,5 +189,16 @@ class Review(Base):
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, index=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text)
 
+    # Vendor reply
+    vendor_reply: Mapped[str | None] = mapped_column(Text)
+    vendor_replied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # ── Relationships ─────────────────────────────────────────────────────────
-    booking: Mapped["Booking"] = relationship(back_populates="review")
+    booking: Mapped["Booking"] = relationship(
+        "Booking",
+        back_populates="review",
+    )
+    reviewer: Mapped["User"] = relationship(
+        "User",
+        foreign_keys="[Review.user_id]",
+    )

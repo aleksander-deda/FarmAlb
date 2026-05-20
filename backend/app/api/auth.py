@@ -81,6 +81,7 @@ def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
 
 @router.get("/me")
 def me(current_user: User = Depends(get_current_user)):
+    print('currentUser: ', current_user)
     return {
         "id": str(current_user.id),
         "email": current_user.email,

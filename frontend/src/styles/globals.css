@@ -1,0 +1,106 @@
+/* ── Design tokens ─────────────────────────────────────────────────────────── */
+:root {
+  /* Colors */
+  --color-earth:        #3b2a1a;   /* deep warm brown — primary text */
+  --color-terracotta:   #c4602a;   /* accent — CTAs, highlights */
+  --color-terracotta-hover: #a84e22;
+  --color-olive:        #4a5240;   /* secondary accent */
+  --color-olive-light:  #6b7560;
+  --color-cream:        #f5f0e8;   /* page background */
+  --color-parchment:    #ede5d4;   /* card backgrounds */
+  --color-parchment-dark: #ddd3be;
+  --color-stone:        #8a7f72;   /* muted text */
+  --color-stone-light:  #b5ad9f;
+  --color-white:        #fdfbf7;
+  --color-error:        #b84040;
+  --color-success:      #3d6b47;
+  --color-border:       #d9cfc0;
+
+  /* Typography */
+  --font-display: 'Cormorant Garamond', Georgia, serif;
+  --font-body:    'DM Sans', system-ui, sans-serif;
+
+  /* Spacing scale */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  24px;
+  --space-6:  32px;
+  --space-7:  48px;
+  --space-8:  64px;
+  --space-9:  96px;
+
+  /* Radii */
+  --radius-sm:  4px;
+  --radius-md:  8px;
+  --radius-lg:  16px;
+  --radius-xl:  24px;
+
+  /* Shadows */
+  --shadow-sm:  0 1px 3px rgba(59,42,26,0.08);
+  --shadow-md:  0 4px 16px rgba(59,42,26,0.10);
+  --shadow-lg:  0 8px 32px rgba(59,42,26,0.14);
+
+  /* Transitions */
+  --transition: 200ms ease;
+}
+
+/* ── Reset ─────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 16px; -webkit-font-smoothing: antialiased; }
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--color-cream);
+  color: var(--color-earth);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+img { max-width: 100%; display: block; }
+a  { color: inherit; text-decoration: none; }
+
+/* ── Grain texture overlay ──────────────────────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-size: 180px;
+}
+
+/* ── Typography helpers ─────────────────────────────────────────────────────── */
+.display { font-family: var(--font-display); }
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  line-height: 1.15;
+  font-weight: 500;
+}
+
+/* ── Utility ────────────────────────────────────────────────────────────────── */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0,0,0,0); border: 0;
+}
+
+/* ── Animations ─────────────────────────────────────────────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

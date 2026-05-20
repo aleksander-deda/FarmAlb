@@ -1,0 +1,17 @@
+.spinner-wrap--center {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: var(--space-8);
+}
+
+.spinner {
+  border-radius: 50%;
+  border: 2px solid var(--color-parchment-dark);
+  border-top-color: var(--color-terracotta);
+  animation: spin 0.7s linear infinite;
+}
+
+.spinner--sm { width: 16px; height: 16px; }
+.spinner--md { width: 28px; height: 28px; }
+.spinner--lg { width: 44px; height: 44px; border-width: 3px; }
