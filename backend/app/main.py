@@ -1,5 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from .admin import setup_admin
+from .db.session import engine
+
 
 from app.core.settings import settings
 from app.api.auth import router as auth_router
@@ -30,14 +33,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+setup_admin(app, engine)
+
 app.include_router(auth_router, prefix="/api/v1")
-app.include_router(vendors_router, prefix="/api/v1")
-app.include_router(catalog_router, prefix="/api/v1")
+app.include_router(admin_router, prefix="/api/v1")
 app.include_router(bookings_router, prefix="/api/v1")
+app.include_router(catalog_router, prefix="/api/v1")
 app.include_router(orders_router, prefix="/api/v1")
 app.include_router(promotions_router, prefix="/api/v1")
-app.include_router(admin_router, prefix="/api/v1")
 app.include_router(reviews_router, prefix="/api/v1")
+app.include_router(vendors_router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["System"])

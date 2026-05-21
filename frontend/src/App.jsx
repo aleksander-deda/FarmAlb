@@ -3,6 +3,10 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import LoginPage   from './pages/LoginPage'
 import LandingPage from './pages/LandingPage'
 import RegisterPage from './pages/RegisterPage'
+import ExplorePage  from './pages/ExplorePage'
+import VendorDetailPage from './pages/VendorDetailPage'
+import DashboardPage from './pages/DashboardPage'
+
 import Spinner     from './components/ui/Spinner'
 import './styles/globals.css'
 
@@ -26,11 +30,11 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/"          element={<LandingPage />} />
-      <Route path="/explore"   element={<Placeholder name="Explore — duke ardhur" />} />
+      <Route path="/explore"   element={<ExplorePage />} />
       <Route path="/login"     element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />}/>
-      <Route path="/dashboard" element={<Protected><Placeholder name="Dashboard — duke ardhur" /></Protected>} />
-      <Route path="/vendors/:id" element={<Placeholder name="Vendor detail — duke ardhur" />} />
+      <Route path="/dashboard" element={<Protected><DashboardPage /></Protected>} />
+      <Route path="/vendors/:id" element={<VendorDetailPage />} />
       <Route path="*"          element={<Navigate to="/" replace />} />
     </Routes>
   )
