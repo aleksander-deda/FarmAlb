@@ -3,10 +3,12 @@ Experience, slot, and product business logic.
 """
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.constants import AuditAction
 from app.models.catalog import Experience, ExperienceSlot, Product, Vendor
 from app.models.identity import User, UserRole, Role
 from app.schemas.catalog import (
@@ -14,6 +16,7 @@ from app.schemas.catalog import (
     SlotCreateRequest, SlotUpdateRequest,
     ProductCreateRequest, ProductUpdateRequest,
 )
+from app.utils.audit import AuditLogger
 
 
 # ── Auth helpers ───────────────────────────────────────────────────────────────
@@ -70,6 +73,7 @@ def create_experience(
     vendor_id: uuid.UUID,
     body: ExperienceCreateRequest,
     current_user: User,
+    request: Any | None = None,
 ) -> Experience:
     _require_vendor_admin(db, vendor_id, current_user)
 
@@ -87,6 +91,15 @@ def create_experience(
     db.add(experience)
     db.commit()
     db.refresh(experience)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.EXPERIENCE_CREATE,
+        resource_type="Experience",
+        actor=current_user,
+        resource_id=experience.id,
+        after={"status": experience.status, "title": experience.title},
+        request=request,
+    )
     return experience
 
 
@@ -113,15 +126,27 @@ def update_experience(
     experience_id: uuid.UUID,
     body: ExperienceUpdateRequest,
     current_user: User,
+    request: Any | None = None,
 ) -> Experience:
     experience = get_experience(db, experience_id)
     _require_vendor_admin(db, experience.vendor_id, current_user)
 
+    previous_status = experience.status
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(experience, field, value)
 
     db.commit()
     db.refresh(experience)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.EXPERIENCE_UPDATE,
+        resource_type="Experience",
+        actor=current_user,
+        resource_id=experience.id,
+        before={"status": previous_status},
+        after={"status": experience.status, "title": experience.title},
+        request=request,
+    )
     return experience
 
 
@@ -129,6 +154,7 @@ def delete_experience(
     db: Session,
     experience_id: uuid.UUID,
     current_user: User,
+    request: Any | None = None,
 ) -> None:
     experience = get_experience(db, experience_id)
     _require_vendor_admin(db, experience.vendor_id, current_user)
@@ -141,6 +167,16 @@ def delete_experience(
 
     db.delete(experience)
     db.commit()
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.EXPERIENCE_DELETE,
+        resource_type="Experience",
+        actor=current_user,
+        resource_id=experience.id,
+        before={"status": experience.status, "title": experience.title},
+        after={"status": "deleted"},
+        request=request,
+    )
 
 
 # ── Slots ──────────────────────────────────────────────────────────────────────
@@ -150,6 +186,7 @@ def create_slot(
     experience_id: uuid.UUID,
     body: SlotCreateRequest,
     current_user: User,
+    request: Any | None = None,
 ) -> ExperienceSlot:
     experience = get_experience(db, experience_id)
     _require_vendor_admin(db, experience.vendor_id, current_user)
@@ -176,6 +213,15 @@ def create_slot(
     db.add(slot)
     db.commit()
     db.refresh(slot)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.SLOT_CREATE,
+        resource_type="ExperienceSlot",
+        actor=current_user,
+        resource_id=slot.id,
+        after={"status": slot.status, "starts_at": slot.starts_at.isoformat()},
+        request=request,
+    )
     return slot
 
 
@@ -198,6 +244,7 @@ def update_slot(
     slot_id: uuid.UUID,
     body: SlotUpdateRequest,
     current_user: User,
+    request: Any | None = None,
 ) -> ExperienceSlot:
     slot = db.query(ExperienceSlot).filter(ExperienceSlot.id == slot_id).first()
     if not slot:
@@ -209,8 +256,19 @@ def update_slot(
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(slot, field, value)
 
+    previous_status = slot.status
     db.commit()
     db.refresh(slot)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.SLOT_UPDATE,
+        resource_type="ExperienceSlot",
+        actor=current_user,
+        resource_id=slot.id,
+        before={"status": previous_status},
+        after={"status": slot.status, "available_spots": slot.available_spots},
+        request=request,
+    )
     return slot
 
 
@@ -218,6 +276,7 @@ def delete_slot(
     db: Session,
     slot_id: uuid.UUID,
     current_user: User,
+    request: Any | None = None,
 ) -> None:
     slot = db.query(ExperienceSlot).filter(ExperienceSlot.id == slot_id).first()
     if not slot:
@@ -241,6 +300,16 @@ def delete_slot(
 
     db.delete(slot)
     db.commit()
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.SLOT_DELETE,
+        resource_type="ExperienceSlot",
+        actor=current_user,
+        resource_id=slot.id,
+        before={"status": slot.status, "starts_at": slot.starts_at.isoformat()},
+        after={"status": "deleted"},
+        request=request,
+    )
 
 
 # ── Products ───────────────────────────────────────────────────────────────────
@@ -250,6 +319,7 @@ def create_product(
     vendor_id: uuid.UUID,
     body: ProductCreateRequest,
     current_user: User,
+    request: Any | None = None,
 ) -> Product:
     _require_vendor_admin(db, vendor_id, current_user)
 
@@ -268,6 +338,15 @@ def create_product(
     db.add(product)
     db.commit()
     db.refresh(product)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.PRODUCT_CREATE,
+        resource_type="Product",
+        actor=current_user,
+        resource_id=product.id,
+        after={"status": product.status, "name": product.name},
+        request=request,
+    )
     return product
 
 
@@ -297,6 +376,7 @@ def update_product(
     product_id: uuid.UUID,
     body: ProductUpdateRequest,
     current_user: User,
+    request: Any | None = None,
 ) -> Product:
     product = get_product(db, product_id)
     _require_vendor_admin(db, product.vendor_id, current_user)
@@ -308,8 +388,19 @@ def update_product(
     if product.stock_qty == 0 and product.status == "active":
         product.status = "out_of_stock"
 
+    previous_status = product.status
     db.commit()
     db.refresh(product)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.PRODUCT_UPDATE,
+        resource_type="Product",
+        actor=current_user,
+        resource_id=product.id,
+        before={"status": previous_status},
+        after={"status": product.status, "stock_qty": product.stock_qty},
+        request=request,
+    )
     return product
 
 
@@ -317,6 +408,7 @@ def delete_product(
     db: Session,
     product_id: uuid.UUID,
     current_user: User,
+    request: Any | None = None,
 ) -> None:
     product = get_product(db, product_id)
     _require_vendor_admin(db, product.vendor_id, current_user)
@@ -329,3 +421,13 @@ def delete_product(
 
     db.delete(product)
     db.commit()
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.PRODUCT_DELETE,
+        resource_type="Product",
+        actor=current_user,
+        resource_id=product.id,
+        before={"status": product.status, "name": product.name},
+        after={"status": "deleted"},
+        request=request,
+    )

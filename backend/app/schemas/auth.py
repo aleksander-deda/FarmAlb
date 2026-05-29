@@ -1,3 +1,4 @@
+from uuid import UUID
 from pydantic import BaseModel, EmailStr
 
 
@@ -21,3 +22,14 @@ class TokenResponse(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class UserResponse(BaseModel):
+    id: UUID
+    email: EmailStr
+    full_name: str
+    locale: str
+    status: str
+    is_superuser: bool
+
+    model_config = {"from_attributes": True}

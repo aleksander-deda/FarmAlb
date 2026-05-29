@@ -5,12 +5,13 @@ from decimal import Decimal, ROUND_HALF_UP
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.constants import AuditAction
 from app.models.catalog import Promotion, Vendor
 from app.models.identity import User, UserRole, Role
 from app.schemas.promotion import (
     PromotionCreateRequest, PromotionUpdateRequest,
 )
-from app.utils.audit import audit_log
+from app.utils.audit import AuditLogger
 
 
 def _round(value: float) -> float:
@@ -77,11 +78,14 @@ def create_promotion(
     db.add(promotion)
     db.flush()
 
-    audit_log(
+    db.commit()
+    db.refresh(promotion)
+
+    AuditLogger.log(
         db=db,
-        actor=current_user,
-        action="promotion.create",
+        action=AuditAction.PROMOTION_CREATE,
         resource_type="Promotion",
+        actor=current_user,
         resource_id=promotion.id,
         after={
             "code": promotion.code,
@@ -92,8 +96,6 @@ def create_promotion(
         request=request,
     )
 
-    db.commit()
-    db.refresh(promotion)
     return promotion
 
 
@@ -151,19 +153,20 @@ def update_promotion(
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(promotion, field, value)
 
-    audit_log(
+    db.commit()
+    db.refresh(promotion)
+
+    AuditLogger.log(
         db=db,
-        actor=current_user,
-        action="promotion.update",
+        action=AuditAction.PROMOTION_UPDATE,
         resource_type="Promotion",
+        actor=current_user,
         resource_id=promotion.id,
         before=before,
         after=body.model_dump(exclude_unset=True),
         request=request,
     )
 
-    db.commit()
-    db.refresh(promotion)
     return promotion
 
 
@@ -184,19 +187,20 @@ def disable_promotion(
     before = {"status": promotion.status}
     promotion.status = "disabled"
 
-    audit_log(
+    db.commit()
+    db.refresh(promotion)
+
+    AuditLogger.log(
         db=db,
-        actor=current_user,
-        action="promotion.disable",
+        action=AuditAction.PROMOTION_DISABLE,
         resource_type="Promotion",
+        actor=current_user,
         resource_id=promotion.id,
         before=before,
         after={"status": "disabled"},
         request=request,
     )
 
-    db.commit()
-    db.refresh(promotion)
     return promotion
 
 

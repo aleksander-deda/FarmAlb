@@ -1,5 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from .admin import setup_admin
 from .db.session import engine
 
@@ -13,7 +15,7 @@ from app.api.orders import router as orders_router
 from app.api.promotions import router as promotions_router
 from app.api.admin import router as admin_router
 from app.api.reviews import router as reviews_router
-
+from app.schemas.response import ApiResponse
 
 
 app = FastAPI(
@@ -43,6 +45,27 @@ app.include_router(orders_router, prefix="/api/v1")
 app.include_router(promotions_router, prefix="/api/v1")
 app.include_router(reviews_router, prefix="/api/v1")
 app.include_router(vendors_router, prefix="/api/v1")
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=ApiResponse(success=False, data=None, message=exc.detail, meta={}).model_dump(),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content=ApiResponse(
+            success=False,
+            data=None,
+            message="Validation error",
+            meta={"errors": exc.errors()},
+        ).model_dump(),
+    )
 
 
 @app.get("/health", tags=["System"])

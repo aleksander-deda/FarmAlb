@@ -4,14 +4,17 @@ All vendor business logic lives here — routers stay thin.
 import re
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
+from app.core.constants import AuditAction
 from app.models.identity import User, UserRole, Role
 from app.models.platform import VendorApplication
 from app.models.catalog import Vendor
 from app.schemas.vendor import VendorApplicationRequest, VendorUpdateRequest
+from app.utils.audit import AuditLogger
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -42,6 +45,7 @@ def apply_as_vendor(
     db: Session,
     user: User,
     body: VendorApplicationRequest,
+    request: Any | None = None,
 ) -> VendorApplication:
     if body.type not in VALID_VENDOR_TYPES:
         raise HTTPException(
@@ -78,6 +82,15 @@ def apply_as_vendor(
     db.add(application)
     db.commit()
     db.refresh(application)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.VENDOR_CREATE,
+        resource_type="VendorApplication",
+        actor=user,
+        resource_id=application.id,
+        after={"status": application.status, "business_name": application.business_name},
+        request=request,
+    )
     return application
 
 
@@ -85,6 +98,7 @@ def approve_application(
     db: Session,
     application_id: uuid.UUID,
     reviewed_by: User,
+    request: Any | None = None,
 ) -> Vendor:
     application = db.query(VendorApplication).filter(
         VendorApplication.id == application_id
@@ -143,6 +157,15 @@ def approve_application(
 
     db.commit()
     db.refresh(vendor)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.VENDOR_APPROVE,
+        resource_type="Vendor",
+        actor=reviewed_by,
+        resource_id=vendor.id,
+        after={"status": vendor.status, "slug": vendor.slug},
+        request=request,
+    )
     return vendor
 
 
@@ -151,6 +174,7 @@ def reject_application(
     application_id: uuid.UUID,
     reviewed_by: User,
     reason: str | None = None,
+    request: Any | None = None,
 ) -> VendorApplication:
     application = db.query(VendorApplication).filter(
         VendorApplication.id == application_id
@@ -168,6 +192,16 @@ def reject_application(
     application.rejection_reason = reason
     db.commit()
     db.refresh(application)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.VENDOR_REJECT,
+        resource_type="VendorApplication",
+        actor=reviewed_by,
+        resource_id=application.id,
+        before={"status": "pending"},
+        after={"status": application.status, "reason": reason},
+        request=request,
+    )
     return application
 
 
@@ -176,6 +210,7 @@ def update_vendor(
     vendor_id: uuid.UUID,
     body: VendorUpdateRequest,
     current_user: User,
+    request: Any | None = None,
 ) -> Vendor:
     vendor = db.query(Vendor).filter(Vendor.id == vendor_id).first()
 
@@ -186,9 +221,20 @@ def update_vendor(
     if vendor.owner_id != current_user.id and not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Not authorized")
 
+    previous_status = vendor.status
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(vendor, field, value)
 
     db.commit()
     db.refresh(vendor)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.VENDOR_UPDATE,
+        resource_type="Vendor",
+        actor=current_user,
+        resource_id=vendor.id,
+        before={"status": previous_status},
+        after={"status": vendor.status, "name": vendor.name},
+        request=request,
+    )
     return vendor

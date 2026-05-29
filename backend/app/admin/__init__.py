@@ -4,12 +4,13 @@ from .views import *
 def setup_admin(app, engine, auth_backend=None):
     admin = Admin(app, engine, authentication_backend=auth_backend)
     
-    # Registering views in logical order
-    admin.add_view(VendorAdmin)
-    admin.add_view(VendorMediaAdmin)
-    admin.add_view(ExperienceAdmin)
-    admin.add_view(ExperienceSlotAdmin)
-    admin.add_view(ProductAdmin)
-    admin.add_view(PromotionAdmin)
-    
+    for view in [
+        UserAdmin, RoleAdmin, PermissionAdmin, RolePermissionAdmin, UserRoleAdmin,
+        VendorAdmin, VendorMediaAdmin, ExperienceAdmin, ExperienceSlotAdmin, ProductAdmin, PromotionAdmin,
+        BookingAdmin, OrderAdmin, OrderItemAdmin, PaymentAdmin, RefundAdmin, PayoutAdmin, ReviewAdmin,
+        AuditLogAdmin, NotificationAdmin, VendorApplicationAdmin, PlatformSettingAdmin, FeatureFlagAdmin,
+        SupportTicketAdmin, SupportMessageAdmin,
+    ]:
+        admin.add_view(view)
+
     return admin

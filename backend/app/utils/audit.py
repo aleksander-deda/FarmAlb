@@ -21,6 +21,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.core.constants import AuditActorType
 from app.models.platform import AuditLog
 from app.models.identity import User
 
@@ -75,4 +76,39 @@ def audit_log(
     )
     db.add(log)
     db.flush()   # write immediately without full commit
+    try:
+        db.commit()  # persist audit independently so it's not lost
+    except Exception:
+        # If committing the audit fails, rollback the session to keep it usable
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        raise
     return log
+
+
+class AuditLogger:
+    @staticmethod
+    def log(
+        db: Session,
+        action: str,
+        resource_type: str,
+        actor: User | None = None,
+        resource_id: uuid.UUID | None = None,
+        before: dict | None = None,
+        after: dict | None = None,
+        request: Any | None = None,
+        actor_type: str = AuditActorType.USER,
+    ) -> AuditLog:
+        return audit_log(
+            db=db,
+            action=action,
+            resource_type=resource_type,
+            actor=actor,
+            resource_id=resource_id,
+            before=before,
+            after=after,
+            request=request,
+            actor_type=actor_type,
+        )

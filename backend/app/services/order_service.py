@@ -13,11 +13,13 @@ Flow:
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
+from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.settings import settings
+from app.core.constants import AuditAction
 from app.models.catalog import Product, Promotion, Vendor
 from app.models.commerce import Order, OrderItem, Payment
 from app.models.identity import User, UserRole, Role
@@ -25,6 +27,7 @@ from app.schemas.order import (
     OrderCreateRequest, OrderCancelRequest,
     OrderShipRequest, TrackingUpdateRequest,
 )
+from app.utils.audit import AuditLogger
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -102,6 +105,7 @@ def create_order(
     db: Session,
     body: OrderCreateRequest,
     current_user: User,
+    request: Any | None = None,
 ) -> Order:
     # 1. Validate vendor exists and is active
     vendor = db.query(Vendor).filter(
@@ -230,6 +234,19 @@ def create_order(
 
     db.commit()
     db.refresh(order)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.ORDER_CREATE,
+        resource_type="Order",
+        actor=current_user,
+        resource_id=order.id,
+        after={
+            "status": order.status,
+            "total": float(order.total),
+            "vendor_id": str(order.vendor_id),
+        },
+        request=request,
+    )
     return order
 
 
@@ -282,6 +299,7 @@ def confirm_order(
     db: Session,
     order_id: uuid.UUID,
     current_user: User,
+    request: Any | None = None,
 ) -> Order:
     """Move order from pending → confirmed after payment success."""
     order = db.query(Order).filter(Order.id == order_id).first()
@@ -299,6 +317,16 @@ def confirm_order(
 
     db.commit()
     db.refresh(order)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.ORDER_CONFIRM,
+        resource_type="Order",
+        actor=current_user,
+        resource_id=order.id,
+        before={"status": "pending"},
+        after={"status": order.status},
+        request=request,
+    )
     return order
 
 
@@ -307,6 +335,7 @@ def ship_order(
     order_id: uuid.UUID,
     body: OrderShipRequest,
     current_user: User,
+    request: Any | None = None,
 ) -> Order:
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
@@ -325,6 +354,16 @@ def ship_order(
 
     db.commit()
     db.refresh(order)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.ORDER_SHIP,
+        resource_type="Order",
+        actor=current_user,
+        resource_id=order.id,
+        before={"status": "confirmed"},
+        after={"status": order.status, "tracking_number": order.tracking_number},
+        request=request,
+    )
     return order
 
 
@@ -332,6 +371,7 @@ def deliver_order(
     db: Session,
     order_id: uuid.UUID,
     current_user: User,
+    request: Any | None = None,
 ) -> Order:
     """Mark as delivered — can be called by vendor or triggered by webhook later."""
     order = db.query(Order).filter(Order.id == order_id).first()
@@ -347,6 +387,16 @@ def deliver_order(
 
     db.commit()
     db.refresh(order)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.ORDER_DELIVER,
+        resource_type="Order",
+        actor=current_user,
+        resource_id=order.id,
+        before={"status": "shipped"},
+        after={"status": order.status},
+        request=request,
+    )
     return order
 
 
@@ -355,6 +405,7 @@ def cancel_order(
     order_id: uuid.UUID,
     body: OrderCancelRequest,
     current_user: User,
+    request: Any | None = None,
 ) -> Order:
     order = db.query(Order).filter(Order.id == order_id).with_for_update().first()
     if not order:
@@ -395,10 +446,21 @@ def cancel_order(
         order.payment.status = "refunded"
         order.payment.refunded_at = datetime.now(timezone.utc)
 
+    previous_status = order.status
     order.status = "cancelled"
     order.cancellation_reason = body.reason
     order.cancelled_at = datetime.now(timezone.utc)
 
     db.commit()
     db.refresh(order)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.ORDER_CANCEL,
+        resource_type="Order",
+        actor=current_user,
+        resource_id=order.id,
+        before={"status": previous_status},
+        after={"status": order.status, "reason": body.reason},
+        request=request,
+    )
     return order

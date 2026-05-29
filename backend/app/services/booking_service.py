@@ -13,15 +13,18 @@ Flow:
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
+from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.settings import settings
+from app.core.constants import AuditAction
 from app.models.catalog import ExperienceSlot, Experience, Promotion
 from app.models.commerce import Booking, Payment
 from app.models.identity import User
 from app.schemas.booking import BookingCreateRequest, BookingCancelRequest
+from app.utils.audit import AuditLogger
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -86,6 +89,7 @@ def create_booking(
     db: Session,
     body: BookingCreateRequest,
     current_user: User,
+    request: Any | None = None,
 ) -> Booking:
     # 1. Load slot and experience
     slot = db.query(ExperienceSlot).filter(
@@ -169,6 +173,19 @@ def create_booking(
 
     db.commit()
     db.refresh(booking)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.BOOKING_CREATE,
+        resource_type="Booking",
+        actor=current_user,
+        resource_id=booking.id,
+        after={
+            "status": booking.status,
+            "total": float(booking.total),
+            "guests": booking.guests,
+        },
+        request=request,
+    )
     return booking
 
 
@@ -246,6 +263,7 @@ def cancel_booking(
     booking_id: uuid.UUID,
     body: BookingCancelRequest,
     current_user: User,
+    request: Any | None = None,
 ) -> Booking:
     booking = db.query(Booking).filter(
         Booking.id == booking_id
@@ -295,6 +313,16 @@ def cancel_booking(
 
     db.commit()
     db.refresh(booking)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.BOOKING_CANCEL,
+        resource_type="Booking",
+        actor=current_user,
+        resource_id=booking.id,
+        before={"status": "pending"},
+        after={"status": booking.status, "reason": body.reason},
+        request=request,
+    )
     return booking
 
 
@@ -302,6 +330,7 @@ def confirm_booking(
     db: Session,
     booking_id: uuid.UUID,
     current_user: User,
+    request: Any | None = None,
 ) -> Booking:
     """
     Called after successful payment confirmation from Stripe webhook.
@@ -325,4 +354,14 @@ def confirm_booking(
 
     db.commit()
     db.refresh(booking)
+    AuditLogger.log(
+        db=db,
+        action=AuditAction.BOOKING_CONFIRM,
+        resource_type="Booking",
+        actor=current_user,
+        resource_id=booking.id,
+        before={"status": "pending"},
+        after={"status": booking.status},
+        request=request,
+    )
     return booking

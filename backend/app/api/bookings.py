@@ -1,9 +1,11 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user, require_superadmin
+from app.schemas.response import ApiResponse
+from app.utils.response import success_response
 from app.db.session import get_db
 from app.models.catalog import ExperienceSlot, Experience
 from app.models.identity import User
@@ -19,35 +21,37 @@ from app.services.booking_service import (
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
 
 
-@router.post("", response_model=BookingResponse, status_code=201)
+@router.post("", response_model=ApiResponse[BookingResponse], status_code=201)
 def book(
     body: BookingCreateRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return create_booking(db, body, current_user)
+    booking = create_booking(db, body, current_user, request)
+    return success_response(data=booking)
 
 
-@router.get("/me", response_model=list[BookingResponse])
+@router.get("/me", response_model=ApiResponse[list[BookingResponse]])
 def my_bookings(
     status: str | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return list_my_bookings(db, current_user, status)
+    return success_response(data=list_my_bookings(db, current_user, status))
 
 
-@router.get("/vendor/{vendor_id}", response_model=list[BookingResponse])
+@router.get("/vendor/{vendor_id}", response_model=ApiResponse[list[BookingResponse]])
 def vendor_bookings(
     vendor_id: UUID,
     status: str | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return list_vendor_bookings(db, vendor_id, current_user, status)
+    return success_response(data=list_vendor_bookings(db, vendor_id, current_user, status))
 
 
-@router.get("/{booking_id}", response_model=BookingDetailResponse)
+@router.get("/{booking_id}", response_model=ApiResponse[BookingDetailResponse])
 def booking_detail(
     booking_id: UUID,
     db: Session = Depends(get_db),
@@ -69,23 +73,27 @@ def booking_detail(
     response.slot_starts_at = slot.starts_at if slot else None
     response.slot_ends_at = slot.ends_at if slot else None
     response.payment_status = booking.payment.status if booking.payment else None
-    return response
+    return success_response(data=response)
 
 
-@router.post("/{booking_id}/cancel", response_model=BookingResponse)
+@router.post("/{booking_id}/cancel", response_model=ApiResponse[BookingResponse])
 def cancel(
     booking_id: UUID,
     body: BookingCancelRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return cancel_booking(db, booking_id, body, current_user)
+    booking = cancel_booking(db, booking_id, body, current_user, request)
+    return success_response(data=booking)
 
 
-@router.post("/{booking_id}/confirm", response_model=BookingResponse)
+@router.post("/{booking_id}/confirm", response_model=ApiResponse[BookingResponse])
 def confirm(
     booking_id: UUID,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_superadmin),
 ):
-    return confirm_booking(db, booking_id, current_user)
+    booking = confirm_booking(db, booking_id, current_user, request)
+    return success_response(data=booking)
