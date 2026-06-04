@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user, require_superadmin
@@ -8,15 +8,11 @@ from app.db.session import get_db
 from app.models.identity import User
 from app.models.catalog import Vendor
 from app.models.platform import VendorApplication
-from fastapi import APIRouter, Depends, HTTPException
 from app.schemas.vendor import (
     VendorApplicationRequest, VendorApplicationResponse,
     VendorResponse, VendorUpdateRequest,
 )
-from app.services.vendor_service import (
-    apply_as_vendor, approve_application,
-    reject_application, update_vendor,
-)
+from app.services.vendor_service import get_vendor_service
 
 router = APIRouter(prefix="/vendors", tags=["Vendors"])
 
@@ -53,10 +49,11 @@ def get_vendor(vendor_id: UUID, db: Session = Depends(get_db)):
 @router.post("/apply", response_model=VendorApplicationResponse, status_code=201)
 def apply(
     body: VendorApplicationRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return apply_as_vendor(db, current_user, body)
+    return get_vendor_service().apply_as_vendor(db, current_user, body, request)
 
 
 @router.get("/my/application", response_model=VendorApplicationResponse)
@@ -77,10 +74,11 @@ def my_application(
 def update(
     vendor_id: UUID,
     body: VendorUpdateRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return update_vendor(db, vendor_id, body, current_user)
+    return get_vendor_service().update(db, vendor_id, body, current_user, request)
 
 
 # ── Superadmin only ────────────────────────────────────────────────────────────
@@ -100,17 +98,19 @@ def list_applications(
 @router.post("/admin/applications/{application_id}/approve", response_model=VendorResponse)
 def approve(
     application_id: UUID,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_superadmin),
 ):
-    return approve_application(db, application_id, current_user)
+    return get_vendor_service().approve_application(db, application_id, current_user, request)
 
 
 @router.post("/admin/applications/{application_id}/reject")
 def reject(
     application_id: UUID,
+    request: Request,
     reason: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_superadmin),
 ):
-    return reject_application(db, application_id, current_user, reason)
+    return get_vendor_service().reject_application(db, application_id, current_user, reason, request)

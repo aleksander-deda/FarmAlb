@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.constants import AuditAction
 from app.models.catalog import Experience, ExperienceSlot, Product, Vendor
+from app.models.commerce import Booking
 from app.models.identity import User, UserRole, Role
 from app.schemas.catalog import (
     ExperienceCreateRequest, ExperienceUpdateRequest,
@@ -17,56 +18,431 @@ from app.schemas.catalog import (
     ProductCreateRequest, ProductUpdateRequest,
 )
 from app.utils.audit import AuditLogger
+from app.services.base import BaseService
 
 
-# ── Auth helpers ───────────────────────────────────────────────────────────────
+class CatalogService(BaseService):
+    """Service for managing catalog items: experiences, slots, and products."""
 
-def _get_vendor_or_403(db: Session, vendor_id: uuid.UUID, current_user: User) -> Vendor:
-    """
-    Returns the vendor if it exists and the current user is its owner
-    or a superadmin. Raises 403 otherwise.
-    """
-    vendor = db.query(Vendor).filter(Vendor.id == vendor_id).first()
-    if not vendor:
-        raise HTTPException(status_code=404, detail="Vendor not found")
+    def _get_vendor_or_403(self, db: Session, vendor_id: uuid.UUID, current_user: User) -> Vendor:
+        """
+        Returns the vendor if it exists and the current user is its owner
+        or a superadmin. Raises 403 otherwise.
+        """
+        vendor = db.query(Vendor).filter(Vendor.id == vendor_id).first()
+        if not vendor:
+            raise HTTPException(status_code=404, detail="Vendor not found")
 
-    if current_user.is_superuser:
+        if current_user.is_superuser:
+            return vendor
+
+        is_vendor_admin = db.query(UserRole).join(Role).filter(
+            UserRole.user_id == current_user.id,
+            UserRole.vendor_id == vendor_id,
+            Role.code.in_(["VENDOR_ADMIN", "VENDOR_STAFF"]),
+        ).first()
+
+        if not is_vendor_admin:
+            raise HTTPException(status_code=403, detail="Not authorized for this vendor")
+
         return vendor
 
-    is_vendor_admin = db.query(UserRole).join(Role).filter(
-        UserRole.user_id == current_user.id,
-        UserRole.vendor_id == vendor_id,
-        Role.code.in_(["VENDOR_ADMIN", "VENDOR_STAFF"]),
-    ).first()
+    def _require_vendor_admin(self, db: Session, vendor_id: uuid.UUID, current_user: User) -> Vendor:
+        """Stricter — requires VENDOR_ADMIN or superadmin (not VENDOR_STAFF)."""
+        vendor = db.query(Vendor).filter(Vendor.id == vendor_id).first()
+        if not vendor:
+            raise HTTPException(status_code=404, detail="Vendor not found")
 
-    if not is_vendor_admin:
-        raise HTTPException(status_code=403, detail="Not authorized for this vendor")
+        if current_user.is_superuser:
+            return vendor
 
-    return vendor
+        is_admin = db.query(UserRole).join(Role).filter(
+            UserRole.user_id == current_user.id,
+            UserRole.vendor_id == vendor_id,
+            Role.code == "VENDOR_ADMIN",
+        ).first()
 
+        if not is_admin:
+            raise HTTPException(status_code=403, detail="Vendor admin access required")
 
-def _require_vendor_admin(db: Session, vendor_id: uuid.UUID, current_user: User) -> Vendor:
-    """Stricter — requires VENDOR_ADMIN or superadmin (not VENDOR_STAFF)."""
-    vendor = db.query(Vendor).filter(Vendor.id == vendor_id).first()
-    if not vendor:
-        raise HTTPException(status_code=404, detail="Vendor not found")
-
-    if current_user.is_superuser:
         return vendor
 
-    is_admin = db.query(UserRole).join(Role).filter(
-        UserRole.user_id == current_user.id,
-        UserRole.vendor_id == vendor_id,
-        Role.code == "VENDOR_ADMIN",
-    ).first()
+    # ── Experiences ────────────────────────────────────────────────────────────
 
-    if not is_admin:
-        raise HTTPException(status_code=403, detail="Vendor admin access required")
+    def create_experience(
+        self,
+        db: Session,
+        vendor_id: uuid.UUID,
+        body: ExperienceCreateRequest,
+        current_user: User,
+        request: Any | None = None,
+    ) -> Experience:
+        self._require_vendor_admin(db, vendor_id, current_user)
 
-    return vendor
+        experience = Experience(
+            vendor_id=vendor_id,
+            title=body.title,
+            description=body.description,
+            type=body.type,
+            duration_minutes=body.duration_minutes,
+            capacity=body.capacity,
+            base_price=body.base_price,
+            currency=body.currency,
+            status="draft",
+        )
+        db.add(experience)
+        db.commit()
+        db.refresh(experience)
+        AuditLogger.log(
+            db=db,
+            action=AuditAction.EXPERIENCE_CREATE,
+            resource_type="Experience",
+            actor=current_user,
+            resource_id=experience.id,
+            after={"status": experience.status, "title": experience.title},
+            request=request,
+        )
+        return experience
+
+    def get_experience(self, db: Session, experience_id: uuid.UUID) -> Experience:
+        experience = db.query(Experience).filter(Experience.id == experience_id).first()
+        if not experience:
+            raise HTTPException(status_code=404, detail="Experience not found")
+        return experience
+
+    def list_experiences(
+        self,
+        db: Session,
+        vendor_id: uuid.UUID,
+        include_drafts: bool = False,
+    ) -> list[Experience]:
+        q = db.query(Experience).filter(Experience.vendor_id == vendor_id)
+        if not include_drafts:
+            q = q.filter(Experience.status == "active")
+        return q.order_by(Experience.created_at.desc()).all()
+
+    def update_experience(
+        self,
+        db: Session,
+        experience_id: uuid.UUID,
+        body: ExperienceUpdateRequest,
+        current_user: User,
+        request: Any | None = None,
+    ) -> Experience:
+        experience = self.get_experience(db, experience_id)
+        self._require_vendor_admin(db, experience.vendor_id, current_user)
+
+        previous_status = experience.status
+        for field, value in body.model_dump(exclude_unset=True).items():
+            setattr(experience, field, value)
+
+        db.commit()
+        db.refresh(experience)
+        AuditLogger.log(
+            db=db,
+            action=AuditAction.EXPERIENCE_UPDATE,
+            resource_type="Experience",
+            actor=current_user,
+            resource_id=experience.id,
+            before={"status": previous_status},
+            after={"status": experience.status, "title": experience.title},
+            request=request,
+        )
+        return experience
+
+    def delete_experience(
+        self,
+        db: Session,
+        experience_id: uuid.UUID,
+        current_user: User,
+        request: Any | None = None,
+    ) -> None:
+        experience = self.get_experience(db, experience_id)
+        self._require_vendor_admin(db, experience.vendor_id, current_user)
+
+        if experience.status == "active":
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot delete an active experience. Archive it first.",
+            )
+
+        db.delete(experience)
+        db.commit()
+        AuditLogger.log(
+            db=db,
+            action=AuditAction.EXPERIENCE_DELETE,
+            resource_type="Experience",
+            actor=current_user,
+            resource_id=experience.id,
+            before={"status": experience.status, "title": experience.title},
+            after={"status": "deleted"},
+            request=request,
+        )
+
+    # ── Slots ──────────────────────────────────────────────────────────────────
+
+    def create_slot(
+        self,
+        db: Session,
+        experience_id: uuid.UUID,
+        body: SlotCreateRequest,
+        current_user: User,
+        request: Any | None = None,
+    ) -> ExperienceSlot:
+        experience = self.get_experience(db, experience_id)
+        self._require_vendor_admin(db, experience.vendor_id, current_user)
+
+        if body.starts_at < datetime.now(timezone.utc):
+            raise HTTPException(status_code=422, detail="Slot cannot start in the past")
+
+        if body.ends_at and body.ends_at <= body.starts_at:
+            raise HTTPException(status_code=422, detail="ends_at must be after starts_at")
+
+        if body.available_spots > experience.capacity:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Available spots cannot exceed experience capacity ({experience.capacity})",
+            )
+
+        slot = ExperienceSlot(
+            experience_id=experience_id,
+            starts_at=body.starts_at,
+            ends_at=body.ends_at,
+            available_spots=body.available_spots,
+            status="open",
+        )
+        db.add(slot)
+        db.commit()
+        db.refresh(slot)
+        AuditLogger.log(
+            db=db,
+            action=AuditAction.SLOT_CREATE,
+            resource_type="ExperienceSlot",
+            actor=current_user,
+            resource_id=slot.id,
+            after={"status": slot.status, "starts_at": slot.starts_at.isoformat()},
+            request=request,
+        )
+        return slot
+
+    def list_slots(
+        self,
+        db: Session,
+        experience_id: uuid.UUID,
+        only_open: bool = True,
+    ) -> list[ExperienceSlot]:
+        q = db.query(ExperienceSlot).filter(
+            ExperienceSlot.experience_id == experience_id,
+            ExperienceSlot.starts_at >= datetime.now(timezone.utc),
+        )
+        if only_open:
+            q = q.filter(ExperienceSlot.status == "open")
+        return q.order_by(ExperienceSlot.starts_at.asc()).all()
+
+    def update_slot(
+        self,
+        db: Session,
+        slot_id: uuid.UUID,
+        body: SlotUpdateRequest,
+        current_user: User,
+        request: Any | None = None,
+    ) -> ExperienceSlot:
+        slot = db.query(ExperienceSlot).filter(ExperienceSlot.id == slot_id).first()
+        if not slot:
+            raise HTTPException(status_code=404, detail="Slot not found")
+
+        experience = self.get_experience(db, slot.experience_id)
+        self._require_vendor_admin(db, experience.vendor_id, current_user)
+
+        for field, value in body.model_dump(exclude_unset=True).items():
+            setattr(slot, field, value)
+
+        previous_status = slot.status
+        db.commit()
+        db.refresh(slot)
+        AuditLogger.log(
+            db=db,
+            action=AuditAction.SLOT_UPDATE,
+            resource_type="ExperienceSlot",
+            actor=current_user,
+            resource_id=slot.id,
+            before={"status": previous_status},
+            after={"status": slot.status, "available_spots": slot.available_spots},
+            request=request,
+        )
+        return slot
+
+    def delete_slot(
+        self,
+        db: Session,
+        slot_id: uuid.UUID,
+        current_user: User,
+        request: Any | None = None,
+    ) -> None:
+        slot = db.query(ExperienceSlot).filter(ExperienceSlot.id == slot_id).first()
+        if not slot:
+            raise HTTPException(status_code=404, detail="Slot not found")
+
+        experience = self.get_experience(db, slot.experience_id)
+        self._require_vendor_admin(db, experience.vendor_id, current_user)
+
+        if slot.status == "open" and slot.starts_at > datetime.now(timezone.utc):
+            # Check if anyone has booked this slot
+            has_bookings = db.query(Booking).filter(
+                Booking.slot_id == slot_id,
+                Booking.status.in_(["pending", "confirmed"]),
+            ).first()
+            if has_bookings:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot delete a slot with active bookings. Cancel it instead.",
+                )
+
+        db.delete(slot)
+        db.commit()
+        AuditLogger.log(
+            db=db,
+            action=AuditAction.SLOT_DELETE,
+            resource_type="ExperienceSlot",
+            actor=current_user,
+            resource_id=slot.id,
+            before={"status": slot.status, "starts_at": slot.starts_at.isoformat()},
+            after={"status": "deleted"},
+            request=request,
+        )
+
+    # ── Products ───────────────────────────────────────────────────────────────
+
+    def create_product(
+        self,
+        db: Session,
+        vendor_id: uuid.UUID,
+        body: ProductCreateRequest,
+        current_user: User,
+        request: Any | None = None,
+    ) -> Product:
+        self._require_vendor_admin(db, vendor_id, current_user)
+
+        product = Product(
+            vendor_id=vendor_id,
+            name=body.name,
+            description=body.description,
+            category=body.category,
+            price=body.price,
+            currency=body.currency,
+            stock_qty=body.stock_qty,
+            shippable=body.shippable,
+            weight_grams=body.weight_grams,
+            status="draft",
+        )
+        db.add(product)
+        db.commit()
+        db.refresh(product)
+        AuditLogger.log(
+            db=db,
+            action=AuditAction.PRODUCT_CREATE,
+            resource_type="Product",
+            actor=current_user,
+            resource_id=product.id,
+            after={"status": product.status, "name": product.name},
+            request=request,
+        )
+        return product
+
+    def get_product(self, db: Session, product_id: uuid.UUID) -> Product:
+        product = db.query(Product).filter(Product.id == product_id).first()
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        return product
+
+    def list_products(
+        self,
+        db: Session,
+        vendor_id: uuid.UUID,
+        category: str | None = None,
+        include_drafts: bool = False,
+    ) -> list[Product]:
+        q = db.query(Product).filter(Product.vendor_id == vendor_id)
+        if not include_drafts:
+            q = q.filter(Product.status == "active")
+        if category:
+            q = q.filter(Product.category == category.upper())
+        return q.order_by(Product.created_at.desc()).all()
+
+    def update_product(
+        self,
+        db: Session,
+        product_id: uuid.UUID,
+        body: ProductUpdateRequest,
+        current_user: User,
+        request: Any | None = None,
+    ) -> Product:
+        product = self.get_product(db, product_id)
+        self._require_vendor_admin(db, product.vendor_id, current_user)
+
+        for field, value in body.model_dump(exclude_unset=True).items():
+            setattr(product, field, value)
+
+        # Auto set out_of_stock if stock hits 0
+        if product.stock_qty == 0 and product.status == "active":
+            product.status = "out_of_stock"
+
+        previous_status = product.status
+        db.commit()
+        db.refresh(product)
+        AuditLogger.log(
+            db=db,
+            action=AuditAction.PRODUCT_UPDATE,
+            resource_type="Product",
+            actor=current_user,
+            resource_id=product.id,
+            before={"status": previous_status},
+            after={"status": product.status, "stock_qty": product.stock_qty},
+            request=request,
+        )
+        return product
+
+    def delete_product(
+        self,
+        db: Session,
+        product_id: uuid.UUID,
+        current_user: User,
+        request: Any | None = None,
+    ) -> None:
+        product = self.get_product(db, product_id)
+        self._require_vendor_admin(db, product.vendor_id, current_user)
+
+        if product.status == "active":
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot delete an active product. Archive it first.",
+            )
+
+        db.delete(product)
+        db.commit()
+        AuditLogger.log(
+            db=db,
+            action=AuditAction.PRODUCT_DELETE,
+            resource_type="Product",
+            actor=current_user,
+            resource_id=product.id,
+            before={"status": product.status, "name": product.name},
+            after={"status": "deleted"},
+            request=request,
+        )
 
 
-# ── Experiences ────────────────────────────────────────────────────────────────
+# ── Global singleton instance and accessors ────────────────────────────────────
+
+_catalog_service = CatalogService()
+
+
+def get_catalog_service() -> CatalogService:
+    """Get the global catalog service instance."""
+    return _catalog_service
+
+
+# ── Backward-compatible wrapper functions ──────────────────────────────────────
 
 def create_experience(
     db: Session,
@@ -75,39 +451,11 @@ def create_experience(
     current_user: User,
     request: Any | None = None,
 ) -> Experience:
-    _require_vendor_admin(db, vendor_id, current_user)
-
-    experience = Experience(
-        vendor_id=vendor_id,
-        title=body.title,
-        description=body.description,
-        type=body.type,
-        duration_minutes=body.duration_minutes,
-        capacity=body.capacity,
-        base_price=body.base_price,
-        currency=body.currency,
-        status="draft",
-    )
-    db.add(experience)
-    db.commit()
-    db.refresh(experience)
-    AuditLogger.log(
-        db=db,
-        action=AuditAction.EXPERIENCE_CREATE,
-        resource_type="Experience",
-        actor=current_user,
-        resource_id=experience.id,
-        after={"status": experience.status, "title": experience.title},
-        request=request,
-    )
-    return experience
+    return get_catalog_service().create_experience(db, vendor_id, body, current_user, request)
 
 
 def get_experience(db: Session, experience_id: uuid.UUID) -> Experience:
-    experience = db.query(Experience).filter(Experience.id == experience_id).first()
-    if not experience:
-        raise HTTPException(status_code=404, detail="Experience not found")
-    return experience
+    return get_catalog_service().get_experience(db, experience_id)
 
 
 def list_experiences(
@@ -115,10 +463,7 @@ def list_experiences(
     vendor_id: uuid.UUID,
     include_drafts: bool = False,
 ) -> list[Experience]:
-    q = db.query(Experience).filter(Experience.vendor_id == vendor_id)
-    if not include_drafts:
-        q = q.filter(Experience.status == "active")
-    return q.order_by(Experience.created_at.desc()).all()
+    return get_catalog_service().list_experiences(db, vendor_id, include_drafts)
 
 
 def update_experience(
@@ -128,26 +473,7 @@ def update_experience(
     current_user: User,
     request: Any | None = None,
 ) -> Experience:
-    experience = get_experience(db, experience_id)
-    _require_vendor_admin(db, experience.vendor_id, current_user)
-
-    previous_status = experience.status
-    for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(experience, field, value)
-
-    db.commit()
-    db.refresh(experience)
-    AuditLogger.log(
-        db=db,
-        action=AuditAction.EXPERIENCE_UPDATE,
-        resource_type="Experience",
-        actor=current_user,
-        resource_id=experience.id,
-        before={"status": previous_status},
-        after={"status": experience.status, "title": experience.title},
-        request=request,
-    )
-    return experience
+    return get_catalog_service().update_experience(db, experience_id, body, current_user, request)
 
 
 def delete_experience(
@@ -156,30 +482,8 @@ def delete_experience(
     current_user: User,
     request: Any | None = None,
 ) -> None:
-    experience = get_experience(db, experience_id)
-    _require_vendor_admin(db, experience.vendor_id, current_user)
+    return get_catalog_service().delete_experience(db, experience_id, current_user, request)
 
-    if experience.status == "active":
-        raise HTTPException(
-            status_code=409,
-            detail="Cannot delete an active experience. Archive it first.",
-        )
-
-    db.delete(experience)
-    db.commit()
-    AuditLogger.log(
-        db=db,
-        action=AuditAction.EXPERIENCE_DELETE,
-        resource_type="Experience",
-        actor=current_user,
-        resource_id=experience.id,
-        before={"status": experience.status, "title": experience.title},
-        after={"status": "deleted"},
-        request=request,
-    )
-
-
-# ── Slots ──────────────────────────────────────────────────────────────────────
 
 def create_slot(
     db: Session,
@@ -188,41 +492,7 @@ def create_slot(
     current_user: User,
     request: Any | None = None,
 ) -> ExperienceSlot:
-    experience = get_experience(db, experience_id)
-    _require_vendor_admin(db, experience.vendor_id, current_user)
-
-    if body.starts_at < datetime.now(timezone.utc):
-        raise HTTPException(status_code=422, detail="Slot cannot start in the past")
-
-    if body.ends_at and body.ends_at <= body.starts_at:
-        raise HTTPException(status_code=422, detail="ends_at must be after starts_at")
-
-    if body.available_spots > experience.capacity:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Available spots cannot exceed experience capacity ({experience.capacity})",
-        )
-
-    slot = ExperienceSlot(
-        experience_id=experience_id,
-        starts_at=body.starts_at,
-        ends_at=body.ends_at,
-        available_spots=body.available_spots,
-        status="open",
-    )
-    db.add(slot)
-    db.commit()
-    db.refresh(slot)
-    AuditLogger.log(
-        db=db,
-        action=AuditAction.SLOT_CREATE,
-        resource_type="ExperienceSlot",
-        actor=current_user,
-        resource_id=slot.id,
-        after={"status": slot.status, "starts_at": slot.starts_at.isoformat()},
-        request=request,
-    )
-    return slot
+    return get_catalog_service().create_slot(db, experience_id, body, current_user, request)
 
 
 def list_slots(
@@ -230,13 +500,7 @@ def list_slots(
     experience_id: uuid.UUID,
     only_open: bool = True,
 ) -> list[ExperienceSlot]:
-    q = db.query(ExperienceSlot).filter(
-        ExperienceSlot.experience_id == experience_id,
-        ExperienceSlot.starts_at >= datetime.now(timezone.utc),
-    )
-    if only_open:
-        q = q.filter(ExperienceSlot.status == "open")
-    return q.order_by(ExperienceSlot.starts_at.asc()).all()
+    return get_catalog_service().list_slots(db, experience_id, only_open)
 
 
 def update_slot(
@@ -246,30 +510,7 @@ def update_slot(
     current_user: User,
     request: Any | None = None,
 ) -> ExperienceSlot:
-    slot = db.query(ExperienceSlot).filter(ExperienceSlot.id == slot_id).first()
-    if not slot:
-        raise HTTPException(status_code=404, detail="Slot not found")
-
-    experience = get_experience(db, slot.experience_id)
-    _require_vendor_admin(db, experience.vendor_id, current_user)
-
-    for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(slot, field, value)
-
-    previous_status = slot.status
-    db.commit()
-    db.refresh(slot)
-    AuditLogger.log(
-        db=db,
-        action=AuditAction.SLOT_UPDATE,
-        resource_type="ExperienceSlot",
-        actor=current_user,
-        resource_id=slot.id,
-        before={"status": previous_status},
-        after={"status": slot.status, "available_spots": slot.available_spots},
-        request=request,
-    )
-    return slot
+    return get_catalog_service().update_slot(db, slot_id, body, current_user, request)
 
 
 def delete_slot(
@@ -278,41 +519,8 @@ def delete_slot(
     current_user: User,
     request: Any | None = None,
 ) -> None:
-    slot = db.query(ExperienceSlot).filter(ExperienceSlot.id == slot_id).first()
-    if not slot:
-        raise HTTPException(status_code=404, detail="Slot not found")
+    return get_catalog_service().delete_slot(db, slot_id, current_user, request)
 
-    experience = get_experience(db, slot.experience_id)
-    _require_vendor_admin(db, experience.vendor_id, current_user)
-
-    if slot.status == "open" and slot.starts_at > datetime.now(timezone.utc):
-        # Check if anyone has booked this slot
-        from app.models.commerce import Booking
-        has_bookings = db.query(Booking).filter(
-            Booking.slot_id == slot_id,
-            Booking.status.in_(["pending", "confirmed"]),
-        ).first()
-        if has_bookings:
-            raise HTTPException(
-                status_code=409,
-                detail="Cannot delete a slot with active bookings. Cancel it instead.",
-            )
-
-    db.delete(slot)
-    db.commit()
-    AuditLogger.log(
-        db=db,
-        action=AuditAction.SLOT_DELETE,
-        resource_type="ExperienceSlot",
-        actor=current_user,
-        resource_id=slot.id,
-        before={"status": slot.status, "starts_at": slot.starts_at.isoformat()},
-        after={"status": "deleted"},
-        request=request,
-    )
-
-
-# ── Products ───────────────────────────────────────────────────────────────────
 
 def create_product(
     db: Session,
@@ -321,40 +529,11 @@ def create_product(
     current_user: User,
     request: Any | None = None,
 ) -> Product:
-    _require_vendor_admin(db, vendor_id, current_user)
-
-    product = Product(
-        vendor_id=vendor_id,
-        name=body.name,
-        description=body.description,
-        category=body.category,
-        price=body.price,
-        currency=body.currency,
-        stock_qty=body.stock_qty,
-        shippable=body.shippable,
-        weight_grams=body.weight_grams,
-        status="draft",
-    )
-    db.add(product)
-    db.commit()
-    db.refresh(product)
-    AuditLogger.log(
-        db=db,
-        action=AuditAction.PRODUCT_CREATE,
-        resource_type="Product",
-        actor=current_user,
-        resource_id=product.id,
-        after={"status": product.status, "name": product.name},
-        request=request,
-    )
-    return product
+    return get_catalog_service().create_product(db, vendor_id, body, current_user, request)
 
 
 def get_product(db: Session, product_id: uuid.UUID) -> Product:
-    product = db.query(Product).filter(Product.id == product_id).first()
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-    return product
+    return get_catalog_service().get_product(db, product_id)
 
 
 def list_products(
@@ -363,12 +542,7 @@ def list_products(
     category: str | None = None,
     include_drafts: bool = False,
 ) -> list[Product]:
-    q = db.query(Product).filter(Product.vendor_id == vendor_id)
-    if not include_drafts:
-        q = q.filter(Product.status == "active")
-    if category:
-        q = q.filter(Product.category == category.upper())
-    return q.order_by(Product.created_at.desc()).all()
+    return get_catalog_service().list_products(db, vendor_id, category, include_drafts)
 
 
 def update_product(
@@ -378,30 +552,7 @@ def update_product(
     current_user: User,
     request: Any | None = None,
 ) -> Product:
-    product = get_product(db, product_id)
-    _require_vendor_admin(db, product.vendor_id, current_user)
-
-    for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(product, field, value)
-
-    # Auto set out_of_stock if stock hits 0
-    if product.stock_qty == 0 and product.status == "active":
-        product.status = "out_of_stock"
-
-    previous_status = product.status
-    db.commit()
-    db.refresh(product)
-    AuditLogger.log(
-        db=db,
-        action=AuditAction.PRODUCT_UPDATE,
-        resource_type="Product",
-        actor=current_user,
-        resource_id=product.id,
-        before={"status": previous_status},
-        after={"status": product.status, "stock_qty": product.stock_qty},
-        request=request,
-    )
-    return product
+    return get_catalog_service().update_product(db, product_id, body, current_user, request)
 
 
 def delete_product(
@@ -410,24 +561,4 @@ def delete_product(
     current_user: User,
     request: Any | None = None,
 ) -> None:
-    product = get_product(db, product_id)
-    _require_vendor_admin(db, product.vendor_id, current_user)
-
-    if product.status == "active":
-        raise HTTPException(
-            status_code=409,
-            detail="Cannot delete an active product. Archive it first.",
-        )
-
-    db.delete(product)
-    db.commit()
-    AuditLogger.log(
-        db=db,
-        action=AuditAction.PRODUCT_DELETE,
-        resource_type="Product",
-        actor=current_user,
-        resource_id=product.id,
-        before={"status": product.status, "name": product.name},
-        after={"status": "deleted"},
-        request=request,
-    )
+    return get_catalog_service().delete_product(db, product_id, current_user, request)

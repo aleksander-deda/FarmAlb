@@ -13,10 +13,7 @@ from app.schemas.booking import (
     BookingCreateRequest, BookingCancelRequest,
     BookingResponse, BookingDetailResponse,
 )
-from app.services.booking_service import (
-    create_booking, get_booking, list_my_bookings,
-    list_vendor_bookings, cancel_booking, confirm_booking,
-)
+from app.services.booking_service import get_booking_service
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
 
@@ -28,7 +25,7 @@ def book(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    booking = create_booking(db, body, current_user, request)
+    booking = get_booking_service().create(db, body, current_user, request)
     return success_response(data=booking)
 
 
@@ -38,7 +35,7 @@ def my_bookings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return success_response(data=list_my_bookings(db, current_user, status))
+    return success_response(data=get_booking_service().list_my(db, current_user, status))
 
 
 @router.get("/vendor/{vendor_id}", response_model=ApiResponse[list[BookingResponse]])
@@ -48,7 +45,7 @@ def vendor_bookings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return success_response(data=list_vendor_bookings(db, vendor_id, current_user, status))
+    return success_response(data=get_booking_service().list_vendor(db, vendor_id, current_user, status))
 
 
 @router.get("/{booking_id}", response_model=ApiResponse[BookingDetailResponse])
@@ -57,7 +54,7 @@ def booking_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    booking = get_booking(db, booking_id, current_user)
+    booking = get_booking_service().get(db, booking_id, current_user)
 
     # Enrich with slot and experience data
     slot = db.query(ExperienceSlot).filter(
@@ -84,7 +81,7 @@ def cancel(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    booking = cancel_booking(db, booking_id, body, current_user, request)
+    booking = get_booking_service().cancel(db, booking_id, body, current_user, request)
     return success_response(data=booking)
 
 
@@ -95,5 +92,5 @@ def confirm(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_superadmin),
 ):
-    booking = confirm_booking(db, booking_id, current_user, request)
+    booking = get_booking_service().confirm(db, booking_id, current_user, request)
     return success_response(data=booking)

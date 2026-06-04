@@ -11,11 +11,7 @@ from app.schemas.review import (
     ReviewModerateRequest, ReviewResponse,
     VendorReplyRequest, VendorRatingStats,
 )
-from app.services.review_service import (
-    create_review, get_review, list_vendor_reviews,
-    list_my_reviews, update_review, moderate_review,
-    reply_to_review, delete_reply, get_vendor_rating_stats,
-)
+from app.services.review_service import get_review_service
 
 router = APIRouter(prefix="/reviews", tags=["Reviews"])
 
@@ -29,7 +25,7 @@ def vendor_reviews(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user),
 ):
-    return _enrich(list_vendor_reviews(db, vendor_id, status, current_user), db)
+    return _enrich(get_review_service().list_vendor(db, vendor_id, status, current_user), db)
 
 
 @router.get("/vendors/{vendor_id}/stats", response_model=VendorRatingStats)
@@ -37,7 +33,7 @@ def vendor_stats(
     vendor_id: UUID,
     db: Session = Depends(get_db),
 ):
-    return get_vendor_rating_stats(db, vendor_id)
+    return get_review_service().get_vendor_rating_stats(db, vendor_id)
 
 
 # ── Authenticated ──────────────────────────────────────────────────────────────
@@ -49,7 +45,7 @@ def create(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    review = create_review(db, body, current_user, request)
+    review = get_review_service().create(db, body, current_user, request)
     return _enrich_one(review, db)
 
 
@@ -58,7 +54,7 @@ def my_reviews(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _enrich(list_my_reviews(db, current_user), db)
+    return _enrich(get_review_service().list_my(db, current_user), db)
 
 
 @router.get("/{review_id}", response_model=ReviewResponse)
@@ -66,7 +62,7 @@ def detail(
     review_id: UUID,
     db: Session = Depends(get_db),
 ):
-    return _enrich_one(get_review(db, review_id), db)
+    return _enrich_one(get_review_service().get(db, review_id), db)
 
 
 @router.patch("/{review_id}", response_model=ReviewResponse)
@@ -77,7 +73,7 @@ def update(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _enrich_one(update_review(db, review_id, body, current_user, request), db)
+    return _enrich_one(get_review_service().update(db, review_id, body, current_user, request), db)
 
 
 @router.post("/{review_id}/reply", response_model=ReviewResponse)
@@ -88,7 +84,7 @@ def reply(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _enrich_one(reply_to_review(db, review_id, body, current_user, request), db)
+    return _enrich_one(get_review_service().reply(db, review_id, body, current_user, request), db)
 
 
 @router.delete("/{review_id}/reply", response_model=ReviewResponse)
@@ -98,7 +94,7 @@ def remove_reply(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _enrich_one(delete_reply(db, review_id, current_user, request), db)
+    return _enrich_one(get_review_service().delete_reply(db, review_id, current_user, request), db)
 
 
 # ── Superadmin ─────────────────────────────────────────────────────────────────
@@ -111,7 +107,7 @@ def moderate(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_superadmin),
 ):
-    return _enrich_one(moderate_review(db, review_id, body, current_user, request), db)
+    return _enrich_one(get_review_service().moderate(db, review_id, body, current_user, request), db)
 
 
 # ── Enrichment helpers ─────────────────────────────────────────────────────────

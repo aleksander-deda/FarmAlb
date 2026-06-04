@@ -10,10 +10,7 @@ from app.schemas.promotion import (
     PromotionCreateRequest, PromotionUpdateRequest,
     PromotionResponse, PromotionValidateRequest, PromotionValidateResponse,
 )
-from app.services.promotion_service import (
-    create_promotion, list_promotions, get_promotion,
-    update_promotion, disable_promotion, validate_promotion,
-)
+from app.services.promotion_service import get_promotion_service
 
 router = APIRouter(prefix="/promotions", tags=["Promotions"])
 
@@ -26,7 +23,7 @@ def create(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return create_promotion(db, vendor_id, body, current_user, request)
+    return get_promotion_service().create(db, vendor_id, body, current_user, request)
 
 
 @router.get("/vendors/{vendor_id}", response_model=list[PromotionResponse])
@@ -36,7 +33,7 @@ def list_vendor_promotions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return list_promotions(db, vendor_id, current_user, status)
+    return get_promotion_service().list(db, vendor_id, current_user, status)
 
 
 @router.get("/{promotion_id}", response_model=PromotionResponse)
@@ -45,7 +42,7 @@ def detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return get_promotion(db, promotion_id, current_user)
+    return get_promotion_service().get(db, promotion_id, current_user)
 
 
 @router.patch("/{promotion_id}", response_model=PromotionResponse)
@@ -56,7 +53,7 @@ def update(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return update_promotion(db, promotion_id, body, current_user, request)
+    return get_promotion_service().update(db, promotion_id, body, current_user, request)
 
 
 @router.post("/{promotion_id}/disable", response_model=PromotionResponse)
@@ -66,7 +63,7 @@ def disable(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return disable_promotion(db, promotion_id, current_user, request)
+    return get_promotion_service().disable(db, promotion_id, current_user, request)
 
 
 @router.post("/validate", response_model=PromotionValidateResponse)
@@ -74,7 +71,7 @@ def validate(
     body: PromotionValidateRequest,
     db: Session = Depends(get_db),
 ):
-    valid, discount, message = validate_promotion(
+    valid, discount, message = get_promotion_service().validate(
         db, body.code, body.vendor_id, body.amount
     )
     return PromotionValidateResponse(
