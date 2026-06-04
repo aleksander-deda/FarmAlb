@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { getErrorMessage } from '../lib/errors'
 import Button from '../components/ui/Button'
 import Input from '../components/ui/Input'
 import Alert from '../components/ui/Alert'
@@ -87,12 +88,7 @@ export default function RegisterPage() {
       await login(form.email, form.password)
       navigate('/', { replace: true })
     } catch (err) {
-      const detail = err.response?.data?.detail
-      setApiError(
-        typeof detail === 'string'
-          ? detail
-          : 'Diçka shkoi keq. Provo përsëri.'
-      )
+      setApiError(getErrorMessage(err))
       setStep(0)
     } finally {
       setLoading(false)

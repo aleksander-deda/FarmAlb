@@ -57,8 +57,8 @@ export default function ExplorePage() {
   const fetchVendors = useCallback(() => {
     setLoading(true)
     vendorApi.list({ type: type || undefined, region: region || undefined })
-      .then(r => {
-        let data = r.data || []
+      .then(vendors => {
+        let data = vendors || []
         if (search) {
           const q = search.toLowerCase()
           data = data.filter(v =>

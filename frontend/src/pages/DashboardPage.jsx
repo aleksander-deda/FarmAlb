@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { getErrorMessage } from '../lib/errors'
 import Navbar from '../components/layout/Navbar'
 import Spinner from '../components/ui/Spinner'
 import {
@@ -93,9 +94,9 @@ function GuestDashboard({ user }) {
       bookingApi.myBookings(),
       orderApi.myOrders(),
     ])
-      .then(([b, o]) => {
-        setBookings(b.data || [])
-        setOrders(o.data   || [])
+      .then(([bookings, orders]) => {
+        setBookings(bookings || [])
+        setOrders(orders || [])
       })
       .finally(() => setLoading(false))
   }, [])
@@ -289,10 +290,12 @@ function AdminDashboard() {
       vendorApi.listApplications(),
       adminApi.auditLogs({ limit: 30 }),
     ])
-      .then(([v, a, l]) => {
-        setVendors(v.data      || [])
-        setApplications(a.data || [])
-        setAuditLogs(l.data?.results || [])
+      .then(([vendors, applications, auditLogsData]) => {
+        setVendors(vendors || [])
+        setApplications(applications || [])
+        // auditLogs response might be { results: [], total, ... } or just an array
+        const logs = Array.isArray(auditLogsData) ? auditLogsData : auditLogsData?.results || []
+        setAuditLogs(logs)
       })
       .finally(() => setLoading(false))
   }
@@ -520,7 +523,7 @@ function CancelBookingBtn({ id, onDone }) {
     if (!confirm('Jeni të sigurt që doni të anuloni këtë rezervim?')) return
     setLoading(true)
     try { await bookingApi.cancel(id, { reason: 'Anuluar nga klienti' }); onDone() }
-    catch { alert('Gabim gjatë anulimit.') }
+    catch (err) { alert(getErrorMessage(err)) }
     finally { setLoading(false) }
   }
   return (
@@ -536,7 +539,7 @@ function CancelOrderBtn({ id, onDone }) {
     if (!confirm('Jeni të sigurt që doni të anuloni këtë porosi?')) return
     setLoading(true)
     try { await orderApi.cancel(id, { reason: 'Anuluar nga klienti' }); onDone() }
-    catch { alert('Gabim gjatë anulimit.') }
+    catch (err) { alert(getErrorMessage(err)) }
     finally { setLoading(false) }
   }
   return (
@@ -551,7 +554,7 @@ function ApproveBtn({ id, onDone }) {
   const handle = async () => {
     setLoading(true)
     try { await vendorApi.approve(id); onDone() }
-    catch { alert('Gabim gjatë aprovimit.') }
+    catch (err) { alert(getErrorMessage(err)) }
     finally { setLoading(false) }
   }
   return (
@@ -568,7 +571,7 @@ function RejectBtn({ id, onDone }) {
     if (reason === null) return
     setLoading(true)
     try { await vendorApi.reject(id, reason); onDone() }
-    catch { alert('Gabim gjatë refuzimit.') }
+    catch (err) { alert(getErrorMessage(err)) }
     finally { setLoading(false) }
   }
   return (

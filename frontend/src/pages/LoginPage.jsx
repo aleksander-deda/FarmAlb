@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { getErrorMessage } from '../lib/errors'
 import Button from '../components/ui/Button'
 import Input from '../components/ui/Input'
 import Alert from '../components/ui/Alert'
@@ -41,12 +42,7 @@ export default function LoginPage() {
       await login(form.email, form.password)
       navigate(from, { replace: true })
     } catch (err) {
-      const msg = err.response?.data?.detail
-      setApiError(
-        typeof msg === 'string'
-          ? msg
-          : 'Kredencialet janë të gabuara. Provo përsëri.'
-      )
+      setApiError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }

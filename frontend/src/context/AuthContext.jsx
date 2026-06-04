@@ -10,8 +10,8 @@ export function AuthProvider({ children }) {
 
   const fetchMe = useCallback(async () => {
     try {
-      const res = await authApi.me()
-      setUser(res.data)
+      const user = await authApi.me()
+      setUser(user)
     } catch {
       setUser(null)
       tokenStorage.clear()
@@ -31,14 +31,14 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const res = await authApi.login({ email, password })
-    const { access_token, refresh_token } = res.data
+    const { access_token, refresh_token } = res
     tokenStorage.setTokens(access_token, refresh_token)
     await fetchMe()
   }
 
   const register = async (data) => {
     const res = await authApi.register(data)
-    return res.data
+    return res
   }
 
   const logout = () => {

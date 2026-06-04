@@ -57,12 +57,12 @@ export default function VendorDetailPage() {
       reviewApi.vendorReviews(id),
       reviewApi.vendorStats(id),
     ])
-      .then(([vRes, eRes, pRes, rRes, sRes]) => {
-        setVendor(vRes.data)
-        setExperiences(eRes.data || [])
-        setProducts(pRes.data    || [])
-        setReviews(rRes.data     || [])
-        setStats(sRes.data)
+      .then(([vendor, experiences, products, reviews, stats]) => {
+        setVendor(vendor)
+        setExperiences(experiences || [])
+        setProducts(products || [])
+        setReviews(reviews || [])
+        setStats(stats)
       })
       .catch(err => {
         if (err.response?.status === 404) setNotFound(true)

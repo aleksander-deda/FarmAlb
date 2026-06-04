@@ -10,19 +10,42 @@ const api = axios.create({
 
 // Attach access token to every request
 api.interceptors.request.use((config) => {
-  const token = tokenStorage.getAccess()   // ← use tokenStorage, not localStorage directly
+  const token = tokenStorage.getAccess()
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
 
-// On 401 — clear tokens and redirect to login
+// Handle ApiResponse structure: extract data on 2xx, handle errors on 4xx/5xx
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    // Response successful (2xx)
+    // Backend returns ApiResponse structure: { success: true, data, message, meta }
+    // Extract just the data for convenience
+    if (res.data?.success === false) {
+      // Response marked as unsuccessful (shouldn't normally happen on 2xx, but handle it)
+      const error = new Error(res.data?.message || 'Request failed')
+      error.response = res
+      error.data = res.data
+      throw error
+    }
+    return res.data?.data !== undefined ? res.data.data : res.data
+  },
   (err) => {
+    // Response error (4xx/5xx)
     if (err.response?.status === 401) {
-      tokenStorage.clear()               // ← use tokenStorage here too
+      tokenStorage.clear()
       window.location.href = '/login'
     }
+    
+    // Extract error message from ApiResponse structure
+    const errData = err.response?.data
+    if (errData?.message) {
+      const error = new Error(errData.message)
+      error.response = err.response
+      error.data = errData
+      return Promise.reject(error)
+    }
+    
     return Promise.reject(err)
   }
 )

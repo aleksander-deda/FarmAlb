@@ -42,8 +42,8 @@ export default function LandingPage() {
 
   useEffect(() => {
     vendorApi.list({ limit: 6 })
-      .then(r => setVendors(r.data))
-      .catch(() => {})
+      .then(vendors => setVendors(vendors || []))
+      .catch(() => setVendors([]))
       .finally(() => setLoading(false))
   }, [])
 
